@@ -48,15 +48,12 @@ const STAFF_ROUTES = {
 };
 
 // Wraps a page in its layout + guard chain, feeding each level's <Outlet />.
+// nest(page, layout, guard) => guard renders layout renders page.
 function nest(page, ...wrappers) {
   return wrappers.reduce(
-    (child, wrapper) => <OutletProvider element={wrapper}>{null}</OutletProvider> && wrapChild(wrapper, child),
+    (child, wrapper) => <OutletProvider element={child}>{wrapper}</OutletProvider>,
     page
   );
-}
-
-function wrapChild(wrapper, child) {
-  return <OutletProvider element={child}>{wrapper}</OutletProvider>;
 }
 
 function Routed() {
