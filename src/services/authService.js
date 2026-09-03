@@ -1,128 +1,152 @@
+// Authentication against the Cloud backend (real email + password accounts).
+//
+// The session object this module produces is the same shape the whole app
+// already consumes ({ id, name, role, department, staffId, ... }) and is
+// mirrored into STORAGE_KEYS.CURRENT_USER so synchronous readers such as
+// attendanceService.actorStamp() keep working unchanged. The authoritative
+// session, however, always lives in the Cloud auth client — restoreSession()
+// re-derives the app session from it on every page load.
 import { getData, setData, removeData } from "./storageService";
 import { STORAGE_KEYS } from "../constants/storageKeys";
-import * as staffService from "./staffService";
+import { supabase } from "@/integrations/supabase/client";
 import * as sessionService from "./sessionService";
-import * as sheetsApi from "./sheetsApi";
 
-// When VITE_APPS_SCRIPT_URL is set, login/staffLogin/logout are backed by
-// the Google Apps Script + Google Sheets backend instead of LocalStorage —
-// see sheetsApi.js and google-apps-script/Code.gs. All other exports here
-// (getCurrentUser/getUsers) keep working unchanged either way, since the
-// Sheets-authenticated session is still mirrored into the same
-// STORAGE_KEYS.CURRENT_USER slot the rest of the app already reads.
-const USE_SHEETS = sheetsApi.isSheetsBackendConfigured();
-
-const DEFAULT_USERS = [
-  { username: "admin", password: "admin123", name: "Admin User", role: "admin" },
-];
-
-export function getUsers() {
-  return getData(STORAGE_KEYS.USERS, DEFAULT_USERS);
+function friendlyAuthError(message) {
+  if (!message) return "Unable to sign in. Please try again.";
+  if (/invalid login credentials/i.test(message)) return "Incorrect email or password.";
+  if (/email not confirmed/i.test(message)) {
+    return "This account still needs to confirm its email address.";
+  }
+  return message;
 }
 
-// Admin login — checks the admin users collection only. Staff accounts
-// never live in this collection, so this can never silently hand a
-// Staff member an Admin session.
-// `location`, when provided, is a { lat, lng, accuracy, address, capturedAt }
-// snapshot (see utils/geo.js) captured by the caller *before* calling
-// login, with the user's consent — same pattern as staff clock-in.
-export async function login(username, password, location = null) {
-  if (USE_SHEETS) return sheetsLogin(username, password, location);
+// Builds the app-level session from the authenticated user: the role comes
+// from the user_roles table (never from anything the client can set), and a
+// staff member's own directory record supplies their name/department/Staff ID.
+async function buildSession(authUser) {
+  const [{ data: roles }, { data: staffRows }, { data: profile }] = await Promise.all([
+    supabase.from("user_roles").select("role").eq("user_id", authUser.id),
+    supabase.from("staff").select("*").eq("auth_user_id", authUser.id).limit(1),
+    supabase.from("profiles").select("name, email").eq("id", authUser.id).maybeSingle(),
+  ]);
 
-  const users = getUsers();
-  const user = users.find(
-    (u) => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password
-  );
-  if (!user) {
-    await sessionService.recordFailedLogin(username.trim(), "Invalid admin credentials");
-    return { success: false, error: "Invalid username or password." };
-  }
-  const session = {
-    id: user.username,
-    username: user.username,
-    name: user.name,
-    role: user.role,
+  const isAdmin = (roles || []).some((r) => r.role === "admin");
+  const staff = (staffRows || [])[0] || null;
+
+  return {
+    id: isAdmin ? authUser.id : staff?.id || authUser.id,
+    authUserId: authUser.id,
+    username: authUser.email,
+    email: authUser.email,
+    staffId: staff?.login_id || null,
+    name: staff?.name || profile?.name || authUser.email,
+    role: isAdmin ? "admin" : "staff",
+    department: staff?.department || null,
     loggedInAt: new Date().toISOString(),
   };
-  setData(STORAGE_KEYS.CURRENT_USER, session);
-  await sessionService.recordLogin(session, location);
-  return { success: true, user: session };
 }
 
-// Shared by login() and staffLogin() when the Google Sheets backend is
-// configured — the backend's Employees sheet holds both admin and staff
-// accounts (Role column), so one call covers both.
-async function sheetsLogin(loginId, password, location) {
-  try {
-    const employee = await sheetsApi.login(loginId, password);
-    const session = {
-      id: employee.employeeId,
-      staffId: employee.loginId,
-      username: employee.loginId,
-      name: employee.name,
-      email: employee.email,
-      role: employee.role === "admin" ? "admin" : "staff",
-      department: employee.department,
-      loggedInAt: new Date().toISOString(),
-    };
-    setData(STORAGE_KEYS.CURRENT_USER, session);
-    await sessionService.recordLogin(session, location);
-    return { success: true, user: session };
-  } catch (err) {
-    await sessionService.recordFailedLogin(loginId.trim(), err.message);
-    return { success: false, error: err.message };
-  }
-}
+async function signIn(email, password, location, { requireRole } = {}) {
+  const trimmed = (email || "").trim();
+  if (!trimmed) return { success: false, error: "Enter your email address." };
 
-// Staff login — checks the staff collection by Staff ID or email, and
-// enforces the account's active/inactive status. Never falls back to
-// granting admin access.
-export async function staffLogin(loginId, password, location = null) {
-  if (!loginId || !loginId.trim()) {
-    return { success: false, error: "Enter your Staff ID or email." };
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: trimmed,
+    password,
+  });
+  if (error || !data?.user) {
+    await sessionService.recordFailedLogin(trimmed, error?.message || "Invalid credentials");
+    return { success: false, error: friendlyAuthError(error?.message) };
   }
-  if (USE_SHEETS) return sheetsLogin(loginId, password, location);
 
-  const staff = staffService.getStaffByLoginId(loginId);
-  if (!staff || staff.password !== password) {
-    await sessionService.recordFailedLogin(loginId.trim(), "Invalid staff credentials");
-    return { success: false, error: "Invalid Staff ID/email or password." };
-  }
-  if (staff.status !== "active") {
-    await sessionService.recordFailedLogin(loginId.trim(), "Account deactivated");
+  const session = await buildSession(data.user);
+
+  if (requireRole && session.role !== requireRole) {
+    await supabase.auth.signOut();
+    removeData(STORAGE_KEYS.CURRENT_USER);
+    await sessionService.recordFailedLogin(trimmed, `Not a ${requireRole} account`);
     return {
       success: false,
-      error: "Your account has been deactivated. Please contact the administrator.",
+      error:
+        requireRole === "admin"
+          ? "This account isn't an administrator. Use the Staff Portal sign-in."
+          : "This is an administrator account. Use the Admin Portal sign-in.",
     };
   }
-  const session = {
-    id: staff.id,
-    staffId: staff.loginId,
-    name: staff.name,
-    email: staff.email,
-    role: "staff",
-    department: staff.department,
-    loggedInAt: new Date().toISOString(),
-  };
+
+  if (session.role === "staff") {
+    const { data: staffRows } = await supabase
+      .from("staff")
+      .select("status")
+      .eq("auth_user_id", data.user.id)
+      .limit(1);
+    if (staffRows?.[0]?.status && staffRows[0].status !== "active") {
+      await supabase.auth.signOut();
+      removeData(STORAGE_KEYS.CURRENT_USER);
+      await sessionService.recordFailedLogin(trimmed, "Account deactivated");
+      return {
+        success: false,
+        error: "Your account has been deactivated. Please contact the administrator.",
+      };
+    }
+  }
+
   setData(STORAGE_KEYS.CURRENT_USER, session);
   await sessionService.recordLogin(session, location);
   return { success: true, user: session };
+}
+
+// Admin login — only accounts holding the admin role can complete it.
+export async function login(email, password, location = null) {
+  return signIn(email, password, location, { requireRole: "admin" });
+}
+
+// Staff portal login — admin accounts are bounced to the admin sign-in.
+export async function staffLogin(email, password, location = null) {
+  return signIn(email, password, location, { requireRole: "staff" });
+}
+
+// Re-derives the app session from the Cloud auth session. Called on every
+// app boot and whenever the auth state changes.
+export async function restoreSession() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) {
+    removeData(STORAGE_KEYS.CURRENT_USER);
+    return null;
+  }
+  const session = await buildSession(data.user);
+  setData(STORAGE_KEYS.CURRENT_USER, session);
+  return session;
 }
 
 // `location` here is the *logout* location snapshot (optional, best-effort).
 export async function logout(location = null) {
   const user = getCurrentUser();
-  if (user) await sessionService.recordLogout(user, location);
-  removeData(STORAGE_KEYS.CURRENT_USER);
-  if (USE_SHEETS) {
+  if (user) {
     try {
-      await sheetsApi.logout();
+      await sessionService.recordLogout(user, location);
     } catch {
-      // token already invalid/expired — local session is cleared regardless
+      // never block sign-out on the audit write
     }
   }
+  removeData(STORAGE_KEYS.CURRENT_USER);
+  await supabase.auth.signOut();
 }
 
+export async function changeOwnPassword(currentPassword, newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: "New password must be at least 6 characters." };
+  }
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+    current_password: currentPassword,
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+// Synchronous mirror of the current session, for the many call sites that
+// stamp records with "who did this" while already inside a signed-in screen.
 export function getCurrentUser() {
   return getData(STORAGE_KEYS.CURRENT_USER, null);
 }
