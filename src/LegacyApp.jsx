@@ -1,5 +1,5 @@
 import { LegacyRouterProvider, OutletProvider, ParamsProvider, useLocation } from "./lib/react-router-shim";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import ProtectedRoute from "./guards/ProtectedRoute";
 import StaffProtectedRoute from "./guards/StaffProtectedRoute";
