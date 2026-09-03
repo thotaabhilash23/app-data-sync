@@ -6,6 +6,7 @@ import { computeLoginStatus, computeLogoutStatus, getRequiredMinutes, calculateW
 import { getCurrentUser } from "./authService";
 import { getSettings } from "./settingsService";
 import * as sheetsApi from "./sheetsApi";
+import { syncCollection, persistCollection } from "./sheetsSync";
 
 // When the Google Apps Script + Google Sheets backend is configured
 // (VITE_APPS_SCRIPT_URL set), clockIn/clockOut are re-validated server-side
@@ -20,8 +21,20 @@ export function getAllAttendance() {
   return getData(STORAGE_KEYS.ATTENDANCE, []);
 }
 
+// Local cache write + write-through to the Cloud database. Kept
+// synchronous-looking (it returns the persist promise) so the many callers
+// below don't have to change, while still surfacing failures in the console.
 export function saveAllAttendance(list) {
   setData(STORAGE_KEYS.ATTENDANCE, list);
+  return persistCollection(STORAGE_KEYS.ATTENDANCE, list).catch((err) => {
+    console.error("attendanceService: failed to save attendance", err);
+  });
+}
+
+// Pulls the attendance records the signed-in user is allowed to see down
+// from the database into the local cache. Call once on mount.
+export function syncAttendance() {
+  return syncCollection(STORAGE_KEYS.ATTENDANCE, []);
 }
 
 export function getRecordFor(staffId, date) {

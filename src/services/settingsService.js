@@ -1,14 +1,11 @@
 import { getData, setData } from "./storageService";
 import { STORAGE_KEYS } from "../constants/storageKeys";
-import * as sheetsApi from "./sheetsApi";
+import * as dbSync from "./dbSync";
 
-// Settings has its own real, auditable `Settings` sheet in Code.gs
-// (handleGetSettings / handleSaveSettings) rather than living in the
-// generic Collections store — see the table in INTEGRATION.md. Values
-// coming back from Sheets are always strings (Sheets cell values), so
-// numeric/boolean-shaped keys are coerced back to their expected type
-// before merging over DEFAULT_SETTINGS.
-const USE_SHEETS = sheetsApi.isSheetsBackendConfigured();
+// Settings live in their own key/value row in the Cloud database
+// (app_settings) rather than in one of the collection tables. Only an admin
+// can write them; every signed-in user can read them, since the whole app
+// derives its attendance rules from these values.
 
 const DEFAULT_SETTINGS = {
   organizationName: "Staff ClockIn",
@@ -70,14 +67,13 @@ export function getSettings() {
 // Pulls the shared settings down from the Sheets backend (when configured)
 // into the local cache. Call once on mount — see useSettings.
 export async function syncSettings() {
-  if (!USE_SHEETS) return getSettings();
   try {
-    const remote = await sheetsApi.getSettings();
+    const remote = await dbSync.fetchSettings();
     const merged = { ...getData(STORAGE_KEYS.SETTINGS, {}), ...coerceRemoteSettings(remote) };
     setData(STORAGE_KEYS.SETTINGS, merged);
     return { ...DEFAULT_SETTINGS, ...merged };
   } catch (err) {
-    console.error("settingsService: failed to fetch settings from Sheets", err);
+    console.error("settingsService: failed to fetch settings", err);
     return getSettings();
   }
 }
@@ -86,13 +82,8 @@ export async function saveSettings(updates) {
   const current = getSettings();
   const next = { ...current, ...updates };
   setData(STORAGE_KEYS.SETTINGS, next);
-  if (USE_SHEETS) {
-    // weekendDays is an array — the Settings sheet stores one scalar per
-    // row, so it travels as a JSON string and is parsed back on read.
-    const payload = { ...updates };
-    if ("weekendDays" in payload) payload.weekendDays = JSON.stringify(payload.weekendDays);
-    await sheetsApi.saveSettings(payload);
-  }
+  // Stored as a single JSON value, so arrays like weekendDays travel as-is.
+  await dbSync.saveSettingsToCloud(next);
   return next;
 }
 

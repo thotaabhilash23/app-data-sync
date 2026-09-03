@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useCallback } from "react";
+import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import * as authService from "../services/authService";
 import * as sessionService from "../services/sessionService";
+import { supabase } from "@/integrations/supabase/client";
 import { captureLocation } from "../utils/geo";
 import { hasPermission as checkPermission } from "../constants/permissions";
 
@@ -18,10 +19,46 @@ function captureLoginLocationInBackground(userId) {
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => authService.getCurrentUser());
+  const [user, setUser] = useState(null);
+  // `ready` stays false until the stored Cloud session has been validated, so
+  // route guards don't bounce a signed-in user to the login screen on reload.
+  const [ready, setReady] = useState(false);
 
-  const login = useCallback(async (username, password) => {
-    const result = await authService.login(username, password);
+  useEffect(() => {
+    let cancelled = false;
+
+    authService
+      .restoreSession()
+      .then((session) => {
+        if (!cancelled) setUser(session);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+
+    // Keeps the app in step when the session is refreshed or cleared
+    // elsewhere (another tab, an expired token).
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+      } else if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        authService.restoreSession().then((session) => {
+          if (!cancelled) setUser(session);
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      sub?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  const login = useCallback(async (email, password) => {
+    const result = await authService.login(email, password);
     if (result.success) {
       setUser(result.user);
       captureLoginLocationInBackground(result.user.id);
@@ -29,8 +66,8 @@ export function AuthProvider({ children }) {
     return result;
   }, []);
 
-  const loginStaff = useCallback(async (loginId, password) => {
-    const result = await authService.staffLogin(loginId, password);
+  const loginStaff = useCallback(async (email, password) => {
+    const result = await authService.staffLogin(email, password);
     if (result.success) {
       setUser(result.user);
       captureLoginLocationInBackground(result.user.id);
@@ -43,7 +80,11 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  const refreshUser = useCallback(() => setUser(authService.getCurrentUser()), []);
+  const refreshUser = useCallback(async () => {
+    const session = await authService.restoreSession();
+    setUser(session);
+    return session;
+  }, []);
 
   const hasPermission = useCallback((permission) => checkPermission(user, permission), [user]);
 
@@ -51,6 +92,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider
       value={{
         user,
+        ready,
         isAuthenticated: !!user,
         isAdmin: user?.role === "admin",
         isStaff: user?.role === "staff",

@@ -1,5 +1,5 @@
 import { LegacyRouterProvider, OutletProvider, ParamsProvider, useLocation } from "./lib/react-router-shim";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import ProtectedRoute from "./guards/ProtectedRoute";
 import StaffProtectedRoute from "./guards/StaffProtectedRoute";
@@ -56,9 +56,22 @@ function nest(page, ...wrappers) {
   );
 }
 
+function SessionSplash() {
+  return (
+    <div className="min-h-screen bg-gradient-ink bg-gradient-mesh flex items-center justify-center">
+      <div className="h-10 w-10 rounded-full border-2 border-white/20 border-t-brass animate-spin" />
+    </div>
+  );
+}
+
 function Routed() {
   const { pathname } = useLocation();
+  const { ready } = useAuth();
   const path = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+
+  // Wait for the stored session to be validated before any guard can decide
+  // to redirect — otherwise a reload flashes the login screen.
+  if (!ready) return <SessionSplash />;
 
   if (path === "/login") return <Login />;
   if (path === "/staff/login") return <StaffLogin />;
