@@ -2,6 +2,12 @@ import { getData } from "./storageService";
 import { STORAGE_KEYS } from "../constants/storageKeys";
 import { generateId } from "../utils/idGenerator";
 import { syncCollection, persistCollection } from "./sheetsSync";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  createStaffAccount,
+  setStaffPassword,
+  deleteStaffAccount,
+} from "../lib/staff-accounts.functions";
 
 // Staff records double as portal accounts: `loginId` + `password` let a
 // staff member sign in at /staff/login, and `status` (active/inactive)
@@ -61,30 +67,65 @@ export function suggestLoginId() {
   return candidate;
 }
 
+// Adds a staff member and, when a password is supplied, provisions their
+// portal login account (email + password) so they can sign in immediately.
 export async function addStaff(data) {
   const list = getAllStaff();
+  const { password, confirmPassword, ...fields } = data;
   const record = {
     id: generateId("stf"),
     status: "active",
     joinDate: data.joinDate || new Date().toISOString().slice(0, 10),
     avatarColor: pickColor(list.length),
-    ...data,
+    ...fields,
   };
   const updated = [...list, record];
   await saveAllStaff(updated);
+
+  if (password) {
+    if (!record.email) {
+      throw new Error("An email address is required to create a portal login.");
+    }
+    await createStaffAccount({
+      data: { staffId: record.id, email: record.email, password, name: record.name },
+    });
+  }
   return record;
 }
 
 export async function updateStaff(id, updates) {
+  const { password, confirmPassword, ...fields } = updates;
   const list = getAllStaff();
-  const updated = list.map((s) => (s.id === id ? { ...s, ...updates } : s));
+  const updated = list.map((s) => (s.id === id ? { ...s, ...fields } : s));
   await saveAllStaff(updated);
-  return updated.find((s) => s.id === id);
+  const record = updated.find((s) => s.id === id);
+
+  if (password) {
+    // Either reset an existing portal account's password, or create the
+    // account now if this member never had one.
+    try {
+      await setStaffPassword({ data: { staffId: id, password } });
+    } catch {
+      if (!record?.email) {
+        throw new Error("An email address is required to create a portal login.");
+      }
+      await createStaffAccount({
+        data: { staffId: id, email: record.email, password, name: record.name },
+      });
+    }
+  }
+  return record;
 }
 
 export async function deleteStaff(id) {
   const list = getAllStaff();
   await saveAllStaff(list.filter((s) => s.id !== id));
+  try {
+    await deleteStaffAccount({ data: { staffId: id } });
+  } catch {
+    // the directory row is gone either way; the login account may simply
+    // never have existed
+  }
 }
 
 export async function setStaffStatus(id, status) {
@@ -104,16 +145,24 @@ export async function updateStaffSelf(id, updates) {
   return updateStaff(id, safeUpdates);
 }
 
+// A staff member changing their own password goes straight through the auth
+// service with their current password — the app never stores passwords.
 export async function changeStaffPassword(id, currentPassword, newPassword) {
-  const staff = getStaffById(id);
-  if (!staff) return { success: false, error: "Staff account not found." };
-  if (staff.password !== currentPassword) {
-    return { success: false, error: "Current password is incorrect." };
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: "New password must be at least 6 characters." };
   }
-  if (!newPassword || newPassword.length < 4) {
-    return { success: false, error: "New password must be at least 4 characters." };
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+    current_password: currentPassword,
+  });
+  if (error) {
+    return {
+      success: false,
+      error: /current password/i.test(error.message)
+        ? "Current password is incorrect."
+        : error.message,
+    };
   }
-  await updateStaff(id, { password: newPassword });
   return { success: true };
 }
 

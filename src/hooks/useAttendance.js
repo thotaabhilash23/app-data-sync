@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import * as attendanceService from "../services/attendanceService";
 
 export function useAttendance() {
@@ -6,14 +6,26 @@ export function useAttendance() {
 
   const refresh = useCallback(() => setRecords(attendanceService.getAllAttendance()), []);
 
-  const clockIn = useCallback((staffId, date, location) => {
-    const r = attendanceService.clockIn(staffId, date, location);
+  // Pull the records this user is allowed to see from the database on mount,
+  // so a fresh device/session sees the shared, persisted data.
+  useEffect(() => {
+    let cancelled = false;
+    attendanceService.syncAttendance().then((list) => {
+      if (!cancelled) setRecords(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clockIn = useCallback(async (staffId, date, location) => {
+    const r = await attendanceService.clockIn(staffId, date, location);
     refresh();
     return r;
   }, [refresh]);
 
-  const clockOut = useCallback((staffId, date, location) => {
-    const r = attendanceService.clockOut(staffId, date, location);
+  const clockOut = useCallback(async (staffId, date, location) => {
+    const r = await attendanceService.clockOut(staffId, date, location);
     refresh();
     return r;
   }, [refresh]);

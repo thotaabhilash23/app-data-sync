@@ -250,7 +250,9 @@
 
 /* Brand gradients (were backgroundImage entries in the v3 config) */
 @utility bg-gradient-accent { background-image: linear-gradient(135deg, #5451B9 0%, #120D9E 55%, #0F0B74 100%); }
-@utility bg-gradient-ink { background-image: linear-gradient(160deg, #1E2036 0%, #151827 55%, #0C0D17 100%); }
+/* The ink gradient also sets a solid base colour, so pairing it with the
+   mesh overlay (which replaces background-image) still reads as dark. */
+@utility bg-gradient-ink { background-color: #151827; background-image: linear-gradient(160deg, #1E2036 0%, #151827 55%, #0C0D17 100%); }
 @utility bg-gradient-mesh { background-image: radial-gradient(at 15% 15%, rgba(18,13,158,0.16) 0px, transparent 55%), radial-gradient(at 85% 0%, rgba(253,108,0,0.12) 0px, transparent 50%), radial-gradient(at 90% 90%, rgba(19,168,112,0.10) 0px, transparent 50%); }
 @utility bg-gradient-flame { background-image: linear-gradient(135deg, #FF9F52 0%, #FD6C00 55%, #DB5900 100%); }
 @utility bg-gradient-brand { background-image: linear-gradient(135deg, #FD6C00 0%, #FF8A3D 30%, #6E5CE8 65%, #120D9E 100%); }
