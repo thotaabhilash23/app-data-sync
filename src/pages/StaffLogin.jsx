@@ -13,7 +13,7 @@ export default function StaffLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({
-    email: typeof window === "undefined" ? "" : localStorage.getItem(REMEMBER_KEY) || "",
+    email: (typeof window !== "undefined" && localStorage.getItem(REMEMBER_KEY)) || "",
     password: "",
   });
   const [remember, setRemember] = useState(
@@ -62,13 +62,13 @@ export default function StaffLogin() {
 
         <form onSubmit={handleSubmit} className="glass rounded-xl2 shadow-lift p-6 sm:p-7 space-y-4">
           <Input
-            label="Email"
+            label="Work email"
             name="email"
             type="email"
-            autoComplete="email"
+            autoComplete="username"
             value={form.email}
             onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-            placeholder="you@yourcompany.com"
+            placeholder="you@company.com"
             className="!bg-white/95"
             required
           />
@@ -112,7 +112,7 @@ export default function StaffLogin() {
           </Button>
 
           <p className="text-[11px] text-ink-300 text-center pt-1">
-            Use the email address and password your administrator set up for you.
+            Use the work email your administrator registered for you.
           </p>
         </form>
 
