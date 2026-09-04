@@ -13,10 +13,12 @@ export default function StaffLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({
-    loginId: localStorage.getItem(REMEMBER_KEY) || "",
+    email: typeof window === "undefined" ? "" : localStorage.getItem(REMEMBER_KEY) || "",
     password: "",
   });
-  const [remember, setRemember] = useState(!!localStorage.getItem(REMEMBER_KEY));
+  const [remember, setRemember] = useState(
+    typeof window !== "undefined" && !!localStorage.getItem(REMEMBER_KEY)
+  );
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -29,13 +31,13 @@ export default function StaffLogin() {
     e.preventDefault();
     setError("");
     setSubmitting(true);
-    const result = await loginStaff(form.loginId, form.password);
+    const result = await loginStaff(form.email, form.password);
     setSubmitting(false);
     if (!result.success) {
       setError(result.error);
       return;
     }
-    if (remember) localStorage.setItem(REMEMBER_KEY, form.loginId.trim());
+    if (remember) localStorage.setItem(REMEMBER_KEY, form.email.trim());
     else localStorage.removeItem(REMEMBER_KEY);
     navigate(location.state?.from || "/staff/dashboard", { replace: true });
   }
@@ -60,12 +62,13 @@ export default function StaffLogin() {
 
         <form onSubmit={handleSubmit} className="glass rounded-xl2 shadow-lift p-6 sm:p-7 space-y-4">
           <Input
-            label="Staff ID / Email"
-            name="loginId"
-            autoComplete="username"
-            value={form.loginId}
-            onChange={(e) => setForm((f) => ({ ...f, loginId: e.target.value }))}
-            placeholder="STF001"
+            label="Email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            value={form.email}
+            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+            placeholder="you@yourcompany.com"
             className="!bg-white/95"
             required
           />
@@ -109,8 +112,7 @@ export default function StaffLogin() {
           </Button>
 
           <p className="text-[11px] text-ink-300 text-center pt-1">
-            Demo credentials — Staff ID <span className="font-mono text-white/80">STF001</span>, password{" "}
-            <span className="font-mono text-white/80">staff123</span>
+            Use the email address and password your administrator set up for you.
           </p>
         </form>
 

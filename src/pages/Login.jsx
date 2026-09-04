@@ -10,7 +10,7 @@ export default function Login() {
   const { login, isAuthenticated, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [form, setForm] = useState({ username: "admin", password: "" });
+  const [form, setForm] = useState({ email: "", password: "" });
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -23,7 +23,7 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setSubmitting(true);
-    const result = await login(form.username, form.password);
+    const result = await login(form.email, form.password);
     setSubmitting(false);
     if (!result.success) {
       setError(result.error);
@@ -53,11 +53,13 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="glass rounded-xl2 shadow-lift p-6 sm:p-7 space-y-4">
           <Input
-            label="Username"
-            name="username"
-            autoComplete="username"
-            value={form.username}
-            onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+            label="Email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="admin@yourcompany.com"
+            value={form.email}
+            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
             className="!bg-white/95"
             required
           />
@@ -91,7 +93,7 @@ export default function Login() {
           </Button>
 
           <p className="text-[11px] text-ink-300 text-center pt-1">
-            Demo credentials — username <span className="font-mono text-white/80">admin</span>, password <span className="font-mono text-white/80">admin123</span>
+            Administrator accounts sign in with their work email address.
           </p>
         </form>
 
