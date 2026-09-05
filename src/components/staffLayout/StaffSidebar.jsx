@@ -36,7 +36,7 @@ export default function StaffSidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-white/10 text-[11px] text-ink-400 leading-relaxed space-y-1">
-        <p>Data is stored only in this browser.</p>
+        <p>Data is saved securely in the cloud.</p>
         <p className="text-ink-500">Powered by Qwik Digital &amp; IT Solutions</p>
       </div>
     </aside>
