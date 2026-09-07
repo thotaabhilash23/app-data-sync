@@ -32,7 +32,15 @@ export async function syncCollection(key, defaultValue) {
 // cache. Always await this — it can fail (network/permissions), and callers
 // should surface that to the user rather than silently losing the write.
 export async function persistCollection(key, value) {
+  const previous = getData(key, null);
   setData(key, value); // optimistic local mirror
-  await dbSync.saveCollection(key, value);
+  try {
+    await dbSync.saveCollection(key, value);
+  } catch (err) {
+    // Roll the cache back so a rejected write never leaves a phantom row
+    // on screen that isn't actually saved anywhere.
+    if (previous !== null) setData(key, previous);
+    throw err;
+  }
   return value;
 }
