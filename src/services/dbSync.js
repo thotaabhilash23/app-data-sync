@@ -32,6 +32,7 @@ const COLLECTIONS = {
       "email",
       "phone",
       "joinDate",
+      "birthDate",
       "status",
       "avatarColor",
       "loginId",
