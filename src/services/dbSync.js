@@ -143,10 +143,16 @@ function rowToRecord(row) {
 function recordToRow(record, columns) {
   const row = {};
   for (const key of columns) {
-    if (key in record && record[key] !== undefined) row[camelToSnake(key)] = record[key];
+    if (key in record && record[key] !== undefined) {
+      const value = record[key];
+      // Empty form fields arrive as "" — Postgres rejects that for date,
+      // timestamp, numeric and json columns, so store a real "no value".
+      row[camelToSnake(key)] = value === "" ? null : value;
+    }
   }
   return row;
 }
+
 
 export function isCloudCollection(key) {
   return key in COLLECTIONS;
